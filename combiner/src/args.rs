@@ -13,8 +13,8 @@ impl Args {
     pub fn new() -> Self {
         Args {
             image_1: get_nth_arg(1),
-            image_2: String::get_nth_arg(2),
-            output: String::get_nth_arg(3),
+            image_2: get_nth_arg(2),
+            output: get_nth_arg(3),
         }
     }
 }
