@@ -1,13 +1,20 @@
 mod args;
 use args::Args;
-use image::{ io::Reader, DynamicImage, ImageFormat, imageops::FilterType::Triangle, GenericImageView };
-use std::{ io::BufReader, fs::File };
+use image::{ io::Reader, DynamicImage, ImageFormat, imageops::FilterType::Triangle, GenericImageView, ImageError };
 use std::convert::TryInto;
+
+// calls to unwrap in your code mean that, at runtime:
+// our code may panic, and may not provide the most useful error
+// it will be worth it to add proper error handling!
 
 #[derive(Debug)]
 enum ImageDataErrors {
     DifferentImageFormats,
-    BufferTooSmall
+    BufferTooSmall,
+    UnableToReadImageFromPath(std::io::Error),
+    UnableToFormatImage(String),
+    UnableToDecodeImage(ImageError),
+    UnableToSaveImage(ImageError),
 }
 
 struct FloatingImage {
@@ -51,8 +58,8 @@ impl FloatingImage {
 
 fn main() -> Result<(), ImageDataErrors> {
     let args = Args::new();
-    let (image_1, image_format_1) = find_image_from_path(args.image_1);
-    let (image_2, image_format_2) = find_image_from_path(args.image_2);
+    let (image_1, image_format_1) = find_image_from_path(args.image_1)?;
+    let (image_2, image_format_2) = find_image_from_path(args.image_2)?;
 
     if image_format_1 != image_format_2 {
         return Err(ImageDataErrors::DifferentImageFormats);
@@ -68,17 +75,28 @@ fn main() -> Result<(), ImageDataErrors> {
 
     // save new image to file
     // notice we pass a reference to the data, not its value
-    image::save_buffer_with_format(output.name, &output.data, output.width, output.height, image::ColorType::Rgba8, image_format_1).unwrap();
-
-    Ok(())
+    if let Err(e) = image::save_buffer_with_format(output.name, &output.data, output.width, output.height, image::ColorType::Rgba8, image_format_1) {
+        Err(ImageDataErrors::UnableToSaveImage(e))
+    } else {
+        Ok(())
+    }
 }
 
 
-fn find_image_from_path(path: String) -> (DynamicImage, ImageFormat) {
-    let image_reader: Reader<BufReader<File>> = Reader::open(path).unwrap();
-    let image_format: ImageFormat = image_reader.format().unwrap();
-    let image: DynamicImage = image_reader.decode().unwrap();
-    (image, image_format)
+fn find_image_from_path(path: String) -> Result<(DynamicImage, ImageFormat), ImageDataErrors> {
+    match Reader::open(&path) {
+        Ok(image_reader) => {
+            if let Some(image_format) = image_reader.format() {
+                return match image_reader.decode() {
+                    Ok(image) => Ok((image, image_format)),
+                    Err(e) => Err(ImageDataErrors::UnableToDecodeImage(e))
+                };
+            } else {
+                return Err(ImageDataErrors::UnableToFormatImage(path));
+            }
+        },
+        Err(e) => Err(ImageDataErrors::UnableToReadImageFromPath(e))
+    }
 }
 
 fn get_smallest_dimensions(dim_1: (u32, u32), dim_2: (u32, u32)) -> (u32, u32) {
@@ -91,7 +109,7 @@ fn get_smallest_dimensions(dim_1: (u32, u32), dim_2: (u32, u32)) -> (u32, u32) {
 // this function resizes the images
 fn standardize_size(image_1: DynamicImage, image_2: DynamicImage) -> (DynamicImage, DynamicImage) {
     let (width, height) = get_smallest_dimensions(image_1.dimensions(), image_2.dimensions());
-    println!("width: {}, height: {}", width, height);
+    // println!("width: {}, height: {}", width, height);
 
     if image_2.dimensions() == (width, height) {
         // resize image 1, return both in a tuple
